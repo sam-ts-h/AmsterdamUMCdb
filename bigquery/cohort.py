@@ -17,9 +17,9 @@ extubationGapHours = 4
 #login terminal commadns
 #brew install --cask google-cloud-sdk   # skip if already installedd
 #gcloud auth application-default login
-#gcloud auth application-default set-quota-project liquid-folio-513114-d9
+#gcloud auth application-default set-quota-project delta-vertex-513114-v2
 
-projectId = "liquid-folio-513114-d9"
+projectId = "delta-vertex-513114-v2" #sam: liquid-folio-513114-d9
 datasetId = "amsterdamumcdb.version1_5_0"
 location = "eu"
 
@@ -43,7 +43,7 @@ def getCohort():
     WHERE provider_id IS NOT NULL AND observation_source_value = 'Toedieningsweg' AND TRIM(value_source_value) IN ('Trach.stoma', 'Spreekcanule', 'Spreekklepje')
     """
 
-    #NEW now we do current group invasive ventilation no tracheostomy no cardiac surgery no planned surgery
+    #NEW now we do current group invasive ventilation no tracheostomy no  surgery no planned surgery
     # (see above table cardiac mostly planned others have few planned so a bit of a bummer but cant delete those)
     #admissions with a tube in device_exposure
     ventilatedSql = f"""
@@ -198,10 +198,9 @@ def getCoverage(goldStandard, variables, hoursBefore=24):
       WHERE provider_id IS NOT NULL AND measurement_concept_id IN ({conceptIds})
       AND (value_as_number IS NOT NULL OR value_as_concept_id > 0 OR value_source_value IS NOT NULL)
       UNION ALL
-      SELECT visit_occurrence_id, observation_concept_id, observation_datetime, observation_datetime
+      SELECT visit_occurrence_id, value_as_concept_id AS conceptId, observation_datetime AS startTime, observation_datetime AS endTime
       FROM observation
-      WHERE provider_id IS NOT NULL AND observation_concept_id IN ({conceptIds})
-      AND (value_as_number IS NOT NULL OR value_as_concept_id > 0 OR value_as_string IS NOT NULL OR value_source_value IS NOT NULL)
+      WHERE provider_id IS NOT NULL AND value_as_concept_id IN ({conceptIds}) AND (value_as_concept_id > 0)
       UNION ALL
       SELECT visit_occurrence_id, condition_concept_id, condition_start_datetime, condition_end_datetime
       FROM condition_occurrence
