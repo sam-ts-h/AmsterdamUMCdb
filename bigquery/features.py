@@ -43,7 +43,10 @@ demographic_variables = {
     "nepalese": [38003595],
     "japanese": [38003584],
     "chinese": [38003579],
-    "weight ": [1029318],
+    #1029318 has no records and  weight is 3025315 with provider_id IS NULL
+    "weight ": [3025315],
+    #also provider_id IS NULL
+    "height": [3036277],
     #comorbidity (chronic):
     #ids from feature engineering notebook
     "kidney ": [198124, 37018761],
@@ -141,6 +144,10 @@ drugVariables = [
 ]
 procedureVariables = [
     "airway_suctioning",
+]
+#measurement with provider_id IS NULL
+nullProviderMeasurementVariables = [
+    "weight ", "height",
 ]
 personVariables = [
     "male", "female", "european", "african", "nepalese", "japanese", "chinese",
@@ -264,6 +271,9 @@ validRanges = {
     "ck_mb": {"low": 0, "high": 100},
     "potassium": {"low": 1, "high": 8},
     "urea": {"low": 0.5, "high": 50},
+    #own range
+    "weight ": {"low": 20, "high": 300},
+    "height": {"low": 120, "high": 220},
 }
 
 #units per var
@@ -301,7 +311,7 @@ extubationKeys = ["visit_occurrence_id", "attemptNumber"]
 def getRecords(goldStandard, names, hours):
     #concept ids per table
     tableIds = {}
-    for table, tableVariables in [("measurement", measurementVariables), ("observation", observationVariables), ("condition_occurrence", conditionVariables), ("drug_exposure", drugVariables), ("procedure_occurrence", procedureVariables)]:
+    for table, tableVariables in [("measurement", measurementVariables), ("observation", observationVariables), ("condition_occurrence", conditionVariables), ("drug_exposure", drugVariables), ("procedure_occurrence", procedureVariables), ("nullProviderMeasurement", nullProviderMeasurementVariables)]:
         idList = ["NULL"]
         for name in names:
             if name in tableVariables:
@@ -319,6 +329,11 @@ def getRecords(goldStandard, names, hours):
         value_as_number AS number, value_as_concept_id AS answer, TRIM(value_source_value) AS answerText, unit_source_value AS unit
       FROM measurement
       WHERE provider_id IS NOT NULL AND measurement_concept_id IN ({tableIds["measurement"]})
+      UNION ALL
+      SELECT visit_occurrence_id, measurement_concept_id, measurement_source_value, measurement_datetime, measurement_datetime,
+        value_as_number, value_as_concept_id, TRIM(value_source_value), unit_source_value
+      FROM measurement
+      WHERE provider_id IS NULL AND measurement_concept_id IN ({tableIds["nullProviderMeasurement"]})
       UNION ALL
       SELECT visit_occurrence_id, observation_concept_id, observation_source_value, observation_datetime, observation_datetime,
         value_as_number, value_as_concept_id, TRIM(value_source_value), unit_source_value
@@ -444,6 +459,7 @@ def getExtraFeatures(features, records):
     #from comments in pulmonary_variables::
     features["rsbi"] = features["respiratory_rate_last"] / (features["tidal_volume_last"] / 1000)
     features["pf_ratio"] = features["pao2_last"] / features["fio2_last"]
+    features["bmi"] = features["weight _last"] / (features["height_last"] / 100) ** 2
     features["ventilation_hours"] = (features["extubationTime"] - features["startTime"]).dt.total_seconds() / 3600
 
     records = records.sort_values("time")
@@ -486,6 +502,7 @@ def getFeatures(goldStandard):
         "sepsis_diagnosis", "suspected_sepsis",
         "pneumonia", "copd",
         "kidney ", "cardiovascular ", "artial_fibrilation ", "diabetes1 ", "hypertension ",
+        "weight ", "height",
     ]
     recentRecords = cleanRecords(getRecords(goldStandard, recentNames, hoursBefore))
     admissionRecords = cleanRecords(getRecords(goldStandard, admissionNames, admissionHours))
@@ -540,7 +557,7 @@ extraGroups = {
     "neuro": ["gcs_total", "pupil_right_reactive_last", "pupil_left_reactive_last", "pupil_right_size_last", "pupil_left_size_last", "pupil_both_reactive", "pupil_any_unreactive", "pupil_size_mean", "pupil_size_difference"],
     "pulmonary": ["rsbi", "pf_ratio"],
     #no records in last 24h so as yes/no over the admission in every model
-    "demographic": ["age", "comorbidity_count", "has_comorbidity", "ventilation_hours", "acute_heart_failure", "cardiogenic_shock"],
+    "demographic": ["age", "comorbidity_count", "has_comorbidity", "ventilation_hours", "bmi", "acute_heart_failure", "cardiogenic_shock"],
 }
 
 #cohort columns for everyone
