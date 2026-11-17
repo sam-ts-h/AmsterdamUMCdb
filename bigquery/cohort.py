@@ -19,7 +19,7 @@ extubationGapHours = 4
 #gcloud auth application-default login
 #gcloud auth application-default set-quota-project delta-vertex-513114-v2
 
-projectId = "delta-vertex-513114-v2" #sam: liquid-folio-513114-d9
+projectId = "liquid-folio-513114-d9" #puck: delta-vertex-513114-v2
 datasetId = "amsterdamumcdb.version1_5_0"
 location = "eu"
 

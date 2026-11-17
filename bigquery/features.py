@@ -1,5 +1,6 @@
 import pandas as pd
-from cohort import client, getCohort
+from google.cloud import bigquery
+from cohort import client, getCohort, datasetId
 #window before extube for measurements
 hoursBefore = 24
 #admission time (very long)
@@ -362,7 +363,8 @@ def getRecords(goldStandard, names, hours):
     AND records.startTime <= cohort.extubationTime
     AND (records.endTime IS NULL OR records.endTime >= TIMESTAMP_SUB(cohort.extubationTime, INTERVAL {hours} HOUR))
     """
-    records = client.query(recordsSql).to_dataframe()
+    recordsConfig = bigquery.QueryJobConfig(default_dataset=datasetId, maximum_bytes_billed=40 * 1024**3)
+    records = client.query(recordsSql, job_config=recordsConfig).to_dataframe()
     #concept id to var name
     conceptNames = {}
     for name in names:
