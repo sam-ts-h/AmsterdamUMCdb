@@ -45,9 +45,10 @@ demographic_variables = {
     "japanese": [38003584],
     "chinese": [38003579],
     #1029318 has no records and  weight is 3025315 with provider_id IS NULL
-    "weight ": [3025315],
-    #also provider_id IS NULL
-    "height": [3036277],
+    #one record per admission, split over concepts by source: body weight, stated, estimated, measured
+    "weight ": [3025315, 3023166, 3026600, 3013762],
+    #also provider_id IS NULL, same split: body height, stated, estimated, measured
+    "height": [3036277, 3019171, 3035463, 3023540],
     #comorbidity (chronic):
     #ids from feature engineering notebook
     "kidney ": [198124, 37018761],
@@ -64,7 +65,6 @@ demographic_columns = {
 # SEPSIS / SYSTEMIC INFECTION
 sepsis_variables = {
     'sepsis_diagnosis': [132797],
-    #from feature engineering notebook, answers Ja Nee Onbekend
     'suspected_sepsis': [44808681],
             #temp Oesophagus, Blaas, Bloed, Rectaal, oraal, oor, axillair
     #oraal 3006322 left out as in feature engineering notebook
@@ -98,7 +98,7 @@ pulmonary_variables = {
         4190647,  # Pneumocystosis pneumonia
     ],
     'copd': [257004],
-    'pao2': [3027315], #deze nog checken of het echt arteriele bloedgassen zijn
+    'blood_po2': [3027315], #deze nog checken of het echt arteriele bloedgassen zijn
     'fio2': [3024882], #zuurstoffractie op fentilator
 
     'respiratory_rate': [3024171,  # Monitor
@@ -128,7 +128,7 @@ measurementVariables = [
     "heart_rate", "invasive_sbp", "invasive_dbp", "cvp", "lactate", "glucose", "hemoglobin", "ck_mb", "tropine", "potassium", "urea", "creatinine",
     "gcs_motor", "gcs_verbal", "gcs_eye", "rass", "eye_pupillary ", "eye_diameter ", "temperature",
     "leukocytes", "platelets", "bilirubin", "map",
-    "pao2", "fio2", "respiratory_rate", "respiratory_rate_spontaneous", "tidal_volume", "tidal_volume_inspired", "tidal_volume_set", "sputum_appearance", "mechanical_ventilation",
+    "blood_po2", "fio2", "respiratory_rate", "respiratory_rate_spontaneous", "tidal_volume", "tidal_volume_inspired", "tidal_volume_set", "sputum_appearance", "mechanical_ventilation",
 ]
 observationVariables = [
     "secretions", "suspected_sepsis",
@@ -257,7 +257,7 @@ validRanges = {
     "tidal_volume": {"low": 50, "high": 2000},
     "tidal_volume_inspired": {"low": 50, "high": 2000},
     "fio2": {"low": 0.21, "high": 1},
-    "pao2": {"low": 20, "high": 600},
+    "blood_po2": {"low": 20, "high": 600},
     "temperature": {"low": 30, "high": 42},
     "leukocytes": {"low": 0.1, "high": 200},
     "lactate": {"low": 0.1, "high": 30},
@@ -286,7 +286,7 @@ unitConversions = {
     "tidal_volume_inspired": {
         "ml": 1,
     },
-    "pao2": {
+    "blood_po2": {
         "mmhg": 1,
         "kpa": 7.50062,
     },
@@ -349,7 +349,7 @@ def getRecords(goldStandard, names, hours):
       SELECT visit_occurrence_id, drug_concept_id, drug_source_value, drug_exposure_start_datetime, drug_exposure_end_datetime,
         NULL, NULL, NULL, NULL
       FROM drug_exposure
-      WHERE provider_id IS NULL AND drug_concept_id IN ({tableIds["drug_exposure"]})
+      WHERE provider_id IS NOT NULL AND drug_concept_id IN ({tableIds["drug_exposure"]})
       UNION ALL
       SELECT visit_occurrence_id, procedure_concept_id, procedure_source_value, procedure_datetime, procedure_datetime,
         quantity, NULL, NULL, NULL
@@ -365,6 +365,8 @@ def getRecords(goldStandard, names, hours):
     """
     recordsConfig = bigquery.QueryJobConfig(default_dataset=datasetId, maximum_bytes_billed=40 * 1024**3)
     records = client.query(recordsSql, job_config=recordsConfig).to_dataframe()
+    #to float for pandas
+    records["number"] = records["number"].astype(float)
     #concept id to var name
     conceptNames = {}
     for name in names:
@@ -384,7 +386,8 @@ def cleanRecords(records):
         knownUnit = records["unit"].str.lower().isin(unitFactors.keys())
         records = records[~isName | knownUnit].copy()
         isName = records["name"] == name
-        factors = records.loc[isName, "unit"].str.lower().map(unitFactors)
+        #astype float as empty selection stays text
+        factors = records.loc[isName, "unit"].str.lower().map(unitFactors).astype(float)
         records.loc[isName, "number"] = records.loc[isName, "number"] * factors
     for name, validRange in validRanges.items():
         isName = records["name"] == name
@@ -409,6 +412,7 @@ def getNumerical(records):
             f"{name}_count": numbers.count(),
             f"{name}_trend": numbers.last() - numbers.first(),
         })
+        aggregates.loc[aggregates[f"{name}_count"] == 1, f"{name}_trend"] = float("nan")
         numerical = numerical.merge(aggregates.reset_index(), on=extubationKeys, how="left")
     return numerical
 
@@ -435,7 +439,11 @@ def getCategories(records):
             f"{name}_last_category": nameRecords.groupby(extubationKeys)["category"].last(),
         })
         #share of records per cat
-        for category in pd.unique(list(answerGroups.values())):
+        categoryList = []
+        for category in answerGroups.values():
+            if category not in categoryList:
+                categoryList.append(category)
+        for category in categoryList:
             nameRecords["isCategory"] = nameRecords["category"] == category
             aggregates[f"{name}_{category}_share"] = nameRecords.groupby(extubationKeys)["isCategory"].mean()
         categories = categories.merge(aggregates.reset_index(), on=extubationKeys, how="left")
@@ -460,7 +468,6 @@ def getExtraFeatures(features, records):
     features["has_comorbidity"] = (features["comorbidity_count"] > 0).astype(int)
     #from comments in pulmonary_variables::
     features["rsbi"] = features["respiratory_rate_last"] / (features["tidal_volume_last"] / 1000)
-    features["pf_ratio"] = features["pao2_last"] / features["fio2_last"]
     features["bmi"] = features["weight _last"] / (features["height_last"] / 100) ** 2
     features["ventilation_hours"] = (features["extubationTime"] - features["startTime"]).dt.total_seconds() / 3600
 
@@ -521,13 +528,17 @@ def getFeatures(goldStandard):
     features = goldStandard.copy()
     for part in [numerical, ordinal, categories, flags]:
         features = features.merge(part, on=extubationKeys, how="left")
-    #no record means no diagnosis or medication
-    for name in flags.columns.drop(extubationKeys):
+    #no record means no diagnosis or medication, also when nobody in the cohort has it
+    for name in flagNames:
+        if name not in features.columns:
+            features[name] = 0
         features[name] = features[name].fillna(0).astype(int)
     #no record means 0 measurements
     for column in features.columns:
         if column.endswith("_count"):
             features[column] = features[column].fillna(0).astype(int)
+    #many columns added one by one, copy puts them back together (fragmented warning)
+    features = features.copy()
 
     #gender ethnicity and age from person table
     personIdList = []

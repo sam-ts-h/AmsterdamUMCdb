@@ -5,6 +5,7 @@ from google.cloud import bigquery
 
 
 onlyFirstExtubation = True
+#168 is 7 days
 failureHours = 168
 minAge = 18 #Cant change as its recorded in cohorts inthe db
 #episodes shorter are left out
@@ -157,6 +158,11 @@ def getCohort():
 
     #comfort care at extubation leave out
     goldStandard = extubationOutcomes[extubationOutcomes["policy"] != "III"].copy()
+
+    #reintubation or death before extubation cant be
+    negativeHours = (goldStandard["hoursToReintubation"] < 0) | (goldStandard["hoursToDeath"] < 0)
+    print(f"left out with reintubation or death before extubation: {negativeHours.sum()}")
+    goldStandard = goldStandard[~negativeHours].copy()
 
     #failure defined as back on a tube or death within 7 days. 48h version as one paper does that maybe to look at sensitive cases more?
     goldStandard["failure"] = (goldStandard["hoursToReintubation"] <= failureHours) | (goldStandard["hoursToDeath"] <= failureHours)
